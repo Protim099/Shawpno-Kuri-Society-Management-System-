@@ -1,44 +1,37 @@
 "use client";
 import { useState } from "react";
-import { Plus } from "lucide-react";
-import { api, fdate } from "@/lib/api";
-import { useLoad, useAction } from "@/lib/hooks";
-import { useAuth } from "@/lib/providers";
-import { Badge, Button, Card, Field, Input, Modal, PageTitle, Select, Table } from "@/components/ui";
+import { useRouter } from "next/navigation";
+import { Landmark } from "lucide-react";
+import { api } from "@/lib/api";
+import { useAuth, useToast } from "@/lib/providers";
+import { Button, Input, Field } from "@/components/ui";
 
-export default function UsersPage() {
-  const { data, reload } = useLoad<any[]>("/users", []);
-  const { data: audit } = useLoad<any[]>("/audit-logs?limit=50", []);
-  const { user } = useAuth(); const run = useAction();
-  const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ name: "", email: "", password: "", role: "ACCOUNTANT" });
-  const sa = user?.role === "SUPER_ADMIN";
+export default function LoginPage() {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const { login } = useAuth();
+  const toast = useToast();
+  const router = useRouter();
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const r = await api("/auth/login", { body: { email, password } });
+      login(r.token, r.user);
+      router.push(r.user.role === "MEMBER" ? "/my" : "/dashboard");
+    } catch (err: any) { toast(err.message, "err"); } finally { setBusy(false); }
+  }
+
   return (
-    <>
-      <PageTitle en="Users & Roles" bn="ব্যবহারকারী ও অনুমতি" action={<Button onClick={() => setOpen(true)}><Plus size={16} /> Add User</Button>} />
-      <Card>
-        <Table head={["Name", "Email", "Role", "Status", "Created", ""]} empty={!data?.length}>
-          {data?.map((u) => (
-            <tr key={u.id}><td>{u.name}</td><td>{u.email}</td>
-              <td><Select className="!w-40 !py-1" value={u.role} disabled={u.id === user?.id} onChange={(e) => run(() => api(`/users/${u.id}`, { method: "PATCH", body: { role: e.target.value } }), "Role updated", reload)}>
-                {["SUPER_ADMIN", "ADMIN", "ACCOUNTANT", "MEMBER"].filter((r) => sa || (r !== "SUPER_ADMIN" && r !== "ADMIN") || r === u.role).map((r) => <option key={r}>{r}</option>)}</Select></td>
-              <td><Badge v={u.isActive ? "ACTIVE" : "INACTIVE"} /></td><td>{fdate(u.createdAt)}</td>
-              <td>{u.id !== user?.id && <Button size="sm" variant="outline" onClick={() => run(() => api(`/users/${u.id}`, { method: "PATCH", body: { isActive: !u.isActive } }), "Updated", reload)}>{u.isActive ? "Disable" : "Enable"}</Button>}</td></tr>
-          ))}
-        </Table>
-      </Card>
-      <Card title="Recent Audit Log / অডিট লগ" className="mt-5">
-        <Table head={["Time", "User", "Action", "Entity", "ID"]} empty={!audit?.length}>{audit?.map((a) => <tr key={a.id}><td>{String(a.createdAt).replace("T", " ").slice(0, 19)}</td><td>{a.user?.name ?? "—"}</td><td>{a.action}</td><td>{a.entity}</td><td>{a.entityId}</td></tr>)}</Table>
-      </Card>
-      <Modal open={open} onClose={() => setOpen(false)} title="Add User">
-        <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); run(() => api("/users", { body: f }), "User created", () => { setOpen(false); reload(); }); }}>
-          <Field label="Name"><Input required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
-          <Field label="Email"><Input required type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} /></Field>
-          <Field label="Password (min 8)"><Input required type="password" minLength={8} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>
-          <Field label="Role"><Select value={f.role} onChange={(e) => setF({ ...f, role: e.target.value })}>{["ACCOUNTANT", "ADMIN", "SUPER_ADMIN"].filter((r) => sa || r === "ACCOUNTANT").map((r) => <option key={r}>{r}</option>)}</Select></Field>
-          <div className="flex justify-end"><Button>Create</Button></div>
-        </form>
-      </Modal>
-    </>
+    <div className="flex min-h-screen items-center justify-center bg-navy-900 p-4">
+      <form onSubmit={submit} className="w-full max-w-sm space-y-4 rounded-2xl bg-white p-8 shadow-2xl">
+        <div className="text-center"><Landmark className="mx-auto mb-2 text-navy-800" size={36} /><h1 className="text-xl font-bold text-navy-800">Samiti Management System</h1><p className="text-sm text-slate-500">সমিতি ম্যানেজমেন্ট সিস্টেম</p></div>
+        <Field label="Email / ইমেইল"><Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoFocus /></Field>
+        <Field label="Password / পাসওয়ার্ড"><Input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} /></Field>
+        <Button className="w-full" disabled={busy}>{busy ? "Signing in..." : "Sign in / লগইন"}</Button>
+      </form>
+    </div>
   );
 }
