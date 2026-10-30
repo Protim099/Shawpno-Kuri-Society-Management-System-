@@ -1,0 +1,313 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  ADMIN
+  ACCOUNTANT
+  MEMBER
+}
+
+enum MemberStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum SavingsTxType {
+  DEPOSIT
+  MONTHLY_SAVINGS
+  ADDITIONAL_SAVINGS
+  WITHDRAWAL
+  REVERSAL
+}
+
+enum LoanStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  ACTIVE
+  CLOSED
+}
+
+enum InstallmentStatus {
+  UPCOMING
+  DUE
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+}
+
+enum FinTxType {
+  MEMBER_DEPOSIT
+  MEMBER_WITHDRAWAL
+  LOAN_DISBURSEMENT
+  PRINCIPAL_REPAYMENT
+  INTEREST_COLLECTION
+  EXPENSE
+  OTHER_INCOME
+  OPENING_BALANCE
+  ADVANCE_RECEIVED
+  REVERSAL
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  name         String   @db.VarChar(120)
+  email        String   @unique @db.VarChar(160)
+  passwordHash String
+  role         Role     @default(MEMBER)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  member        Member?
+  auditLogs     AuditLog[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model Member {
+  id                   Int          @id @default(autoincrement())
+  memberCode           String       @unique @db.VarChar(20)
+  userId               Int?         @unique
+  fullName             String       @db.VarChar(120)
+  guardianName         String?      @db.VarChar(120)
+  mobile               String       @db.VarChar(20)
+  address              String?      @db.VarChar(255)
+  joiningDate          DateTime     @db.Date
+  photoUrl             String?      @db.MediumText
+  monthlySavingsTarget Decimal      @default(0) @db.Decimal(15, 2)
+  status               MemberStatus @default(ACTIVE)
+  isDemo               Boolean      @default(false)
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+
+  user           User?           @relation(fields: [userId], references: [id])
+  savingsAccount SavingsAccount?
+  loans          Loan[]
+  finTx          FinancialTransaction[]
+
+  @@index([fullName])
+  @@index([mobile])
+  @@map("members")
+}
+
+model SavingsAccount {
+  id        Int      @id @default(autoincrement())
+  memberId  Int      @unique
+  balance   Decimal  @default(0) @db.Decimal(15, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  member       Member               @relation(fields: [memberId], references: [id])
+  transactions SavingsTransaction[]
+
+  @@map("savings_accounts")
+}
+
+model SavingsTransaction {
+  id           Int           @id @default(autoincrement())
+  receiptNo    String        @unique @db.VarChar(30)
+  accountId    Int
+  type         SavingsTxType
+  amount       Decimal       @db.Decimal(15, 2)
+  balanceAfter Decimal       @db.Decimal(15, 2)
+  txDate       DateTime      @db.Date
+  note         String?       @db.VarChar(255)
+  reversedById Int?          @unique
+  createdById  Int?
+  createdAt    DateTime      @default(now())
+
+  account SavingsAccount @relation(fields: [accountId], references: [id])
+
+  @@index([accountId, txDate])
+  @@map("savings_transactions")
+}
+
+model Loan {
+  id                 Int        @id @default(autoincrement())
+  loanCode           String     @unique @db.VarChar(20)
+  memberId           Int
+  principal          Decimal    @db.Decimal(15, 2)
+  interestRate       Decimal    @db.Decimal(6, 3) // percent per month, frozen per loan
+  calcMethod         String     @default("FLAT_MONTHLY") @db.VarChar(30)
+  durationMonths     Int
+  monthlyInterest    Decimal    @db.Decimal(15, 2)
+  totalInterest      Decimal    @db.Decimal(15, 2)
+  totalPayable       Decimal    @db.Decimal(15, 2)
+  monthlyInstallment Decimal    @db.Decimal(15, 2)
+  status             LoanStatus @default(PENDING)
+  applicationDate    DateTime   @db.Date
+  approvedAt         DateTime?
+  disbursementDate   DateTime?  @db.Date
+  firstInstallmentDate DateTime? @db.Date
+  principalRecovered Decimal    @default(0) @db.Decimal(15, 2)
+  interestCollected  Decimal    @default(0) @db.Decimal(15, 2)
+  advanceBalance     Decimal    @default(0) @db.Decimal(15, 2)
+  isDemo             Boolean    @default(false)
+  createdById        Int?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+
+  member       Member            @relation(fields: [memberId], references: [id])
+  installments LoanInstallment[]
+  repayments   LoanRepayment[]
+  finTx        FinancialTransaction[]
+
+  @@index([memberId])
+  @@index([status])
+  @@map("loans")
+}
+
+model LoanInstallment {
+  id              Int               @id @default(autoincrement())
+  loanId          Int
+  number          Int
+  dueDate         DateTime          @db.Date
+  principalAmount Decimal           @db.Decimal(15, 2)
+  interestAmount  Decimal           @db.Decimal(15, 2)
+  totalAmount     Decimal           @db.Decimal(15, 2)
+  paidPrincipal   Decimal           @default(0) @db.Decimal(15, 2)
+  paidInterest    Decimal           @default(0) @db.Decimal(15, 2)
+  paidAmount      Decimal           @default(0) @db.Decimal(15, 2)
+  status          InstallmentStatus @default(UPCOMING)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  loan       Loan            @relation(fields: [loanId], references: [id])
+  repayments LoanRepayment[]
+
+  @@unique([loanId, number])
+  @@index([dueDate, status])
+  @@map("loan_installments")
+}
+
+model LoanRepayment {
+  id             Int      @id @default(autoincrement())
+  receiptNo      String   @unique @db.VarChar(30)
+  idempotencyKey String?  @unique @db.VarChar(80)
+  loanId         Int
+  installmentId  Int?
+  amount         Decimal  @db.Decimal(15, 2)
+  principalPart  Decimal  @db.Decimal(15, 2)
+  interestPart   Decimal  @db.Decimal(15, 2)
+  advancePart    Decimal  @default(0) @db.Decimal(15, 2)
+  allocations    Json?
+  paymentDate    DateTime @db.Date
+  reversed       Boolean  @default(false)
+  note           String?  @db.VarChar(255)
+  createdById    Int?
+  createdAt      DateTime @default(now())
+
+  loan        Loan             @relation(fields: [loanId], references: [id])
+  installment LoanInstallment? @relation(fields: [installmentId], references: [id])
+
+  @@index([loanId, paymentDate])
+  @@map("loan_repayments")
+}
+
+model FinancialTransaction {
+  id          Int       @id @default(autoincrement())
+  txCode      String    @unique @db.VarChar(30)
+  type        FinTxType
+  memberId    Int?
+  loanId      Int?
+  amount      Decimal   @db.Decimal(15, 2)
+  txDate      DateTime  @db.Date
+  reference   String?   @db.VarChar(60)
+  description String?   @db.VarChar(255)
+  reversalOf  Int?
+  isDemo      Boolean   @default(false)
+  createdById Int?
+  createdAt   DateTime  @default(now())
+
+  member  Member?        @relation(fields: [memberId], references: [id])
+  loan    Loan?          @relation(fields: [loanId], references: [id])
+  entries LedgerEntry[]
+
+  @@index([type, txDate])
+  @@index([memberId])
+  @@index([loanId])
+  @@map("financial_transactions")
+}
+
+// Double-entry: every transaction has balanced debit/credit lines.
+model LedgerEntry {
+  id            Int      @id @default(autoincrement())
+  transactionId Int
+  account       String   @db.VarChar(40) // CASH, MEMBER_SAVINGS, LOANS_RECEIVABLE, INTEREST_INCOME, EXPENSE, OTHER_INCOME, ADVANCE_LIABILITY, OPENING_CAPITAL
+  debit         Decimal  @default(0) @db.Decimal(15, 2)
+  credit        Decimal  @default(0) @db.Decimal(15, 2)
+  createdAt     DateTime @default(now())
+
+  transaction FinancialTransaction @relation(fields: [transactionId], references: [id])
+
+  @@index([account])
+  @@index([transactionId])
+  @@map("ledger_entries")
+}
+
+model Expense {
+  id          Int      @id @default(autoincrement())
+  category    String   @db.VarChar(60)
+  amount      Decimal  @db.Decimal(15, 2)
+  expenseDate DateTime @db.Date
+  description String?  @db.VarChar(255)
+  txId        Int?
+  reversed    Boolean  @default(false)
+  isDemo      Boolean  @default(false)
+  createdById Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([expenseDate])
+  @@map("expenses")
+}
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  title     String   @db.VarChar(120)
+  message   String   @db.VarChar(255)
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  action    String   @db.VarChar(60)
+  entity    String   @db.VarChar(60)
+  entityId  String?  @db.VarChar(40)
+  details   Json?
+  ip        String?  @db.VarChar(60)
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model SocietySetting {
+  id        Int      @id @default(autoincrement())
+  key       String   @unique @db.VarChar(60)
+  value     String   @db.VarChar(255)
+  updatedAt DateTime @updatedAt
+
+  @@map("society_settings")
+}
